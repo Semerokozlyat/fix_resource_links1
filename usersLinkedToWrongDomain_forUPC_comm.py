@@ -129,17 +129,19 @@ def findAffectedUsersWrongDomainTenant(api, aps_api, Token, appInstanceId):
         data2 = [str(user['aps']['id']), str(user['tenant']['aps']['id'])]
         usersMap[str(user['login'].lower())] = data2
 
-    #return usersMap
+    return usersMap
     #return domainTenantMap
 
     #keys = usersMap.keys()
 
-    for user in usersMap:
-        print "Comparing this: ", usersMap[user][1], " and: ", domainTenantMap[user.split('@')[1]][2]
-        if not usersMap[user][1] == domainTenantMap[user.split('@')[1]][2]:
-            affectedUsers.append(user)
-        else:
-            next()
+
+    #for user in usersMap.keys():
+        #print user
+        #print "Comparing this: ", usersMap[user][1], " and: ", domainTenantMap[user.split('@')[1]][2]
+        #if not usersMap[user][1] == domainTenantMap[user.split('@')[1]][2]:
+        #    affectedUsers.append(user)
+        #else:
+        #   next()
 
         #print user
 
@@ -237,7 +239,8 @@ def main():
 
         #allDomainMap1 = findAffectedUsersWrongDomainTenant(api, aps_api, appInstanceToken, options.app_instance_id)
         #print allDomainMap1
-        findAffectedUsersWrongDomainTenant(api, aps_api, appInstanceToken, options.app_instance_id)
+        alluserMap1 = findAffectedUsersWrongDomainTenant(api, aps_api, appInstanceToken, options.app_instance_id)
+        print alluserMap1
 
 
 
