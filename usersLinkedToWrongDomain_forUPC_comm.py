@@ -240,7 +240,7 @@ def main():
         #allDomainMap1 = findAffectedUsersWrongDomainTenant(api, aps_api, appInstanceToken, options.app_instance_id)
         #print allDomainMap1
         alluserMap1 = findAffectedUsersWrongDomainTenant(api, aps_api, appInstanceToken, options.app_instance_id)
-        print alluserMap1
+        print alluserMap1  
 
 
 
