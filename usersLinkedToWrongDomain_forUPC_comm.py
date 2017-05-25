@@ -102,9 +102,10 @@ def findAffectedUsersWrongDomainTenant(api, aps_api, Token, appInstanceId):
 """
     instanceUserCount = countInstanceResources(api, aps_api, Token, appInstanceId, O365_APS_TYPE_USER)
     instanceDomainsCount = countInstanceResources(api, aps_api, Token, appInstanceId, O365_APS_TYPE_DOMAIN)
-    affectedUsers = []
+    affectedUsers = {}
     domainTenantMap = {}
     usersMap = {}
+    allDomainsList = []
 
     path = "aps/2/resources?implementing(%s)" \
            ",and(eq(aps.status,aps:ready))" \
@@ -113,38 +114,53 @@ def findAffectedUsersWrongDomainTenant(api, aps_api, Token, appInstanceId):
            % (O365_APS_TYPE_DOMAIN, instanceDomainsCount)
     allInstanceDomains = aps_api.GET(path, Token)
     for domain in allInstanceDomains:
-        #creating map: domain name as a key and list of values: domain APS UID, cloud status and corresponding Tenant APS UID
-        data = [str(domain['aps']['id']), str(domain['cloud_status']), str(domain['tenant']['aps']['id'])]
-        domainTenantMap[str(domain['domain_name'].lower())] = data
+        # Creating map:  {'domain APS UID': ['domain name','cloud status','Tenant APS UID'], ... }
+        data = [str(domain['domain_name']), str(domain['cloud_status']), str(domain['tenant']['aps']['id']).lower()]
+        domainTenantMap[str(domain['aps']['id'])] = data
 
+        # List with all domains - to save time and not to ask APSC every time.
+        allDomainsList.append(str(domain['domain_name']).lower())
 
     path2 = "aps/2/resources?implementing(%s)" \
             ",and(eq(aps.status,aps:ready))" \
-            ",select(aps.id,login,tenant.aps.id)" \
+            ",select(aps.id,login,tenant.aps.id,domain.aps.id)" \
             ",limit(0,%d)" \
             % (O365_APS_TYPE_USER, instanceUserCount)
     allInstanceUsers = aps_api.GET(path2, Token)
     for user in allInstanceUsers:
-        #creating map: user login as key and list of values: user APS UID, corresponding Tenant APS UID
-        data2 = [str(user['aps']['id']), str(user['tenant']['aps']['id'])]
-        usersMap[str(user['login'].lower())] = data2
+        # Creating map: {'user APS UID': ['user login', 'Tenant APS UID', 'linked domain APS UID'], ... }
+        data2 = [str(user['login']).lower(), str(user['tenant']['aps']['id']), str(user['domain']['aps']['id'])]
+        usersMap[str(user['aps']['id'])] = data2
 
-    return usersMap
-    #return domainTenantMap
+    # Our maps (hint):
+    # domainTenantMap = {'domain APS UID': ['domain name','cloud status','Tenant APS UID'], ... }
+    # usersMap =        {'user APS UID':   ['user login', 'Tenant APS UID', 'linked domain APS UID'], ... }
 
-    #keys = usersMap.keys()
+    for key, val in usersMap.items():
+        loginDomainPart = val[0].split('@')[1]
+        userAPSTenant = val[1]
+        userDomainUID = val[2]
+        # Processing 2 maps: "usersMap" and "domainTenantMap".
+        if loginDomainPart not in allDomainsList:
+            log("Domain " + loginDomainPart + " has no Office365 service assigned.", logging.INFO, True)
+        elif userAPSTenant == domainTenantMap[userDomainUID][2]:
+            pass
+            # log("User " + key + " is linked to domain with the same Tenant APS UID. Correct.", logging.INFO, True)
+        elif not (userAPSTenant == domainTenantMap[userDomainUID][2]):
+            log("User " + key + " and its linked domain has different Tenant APS UIDs. Tenant UID of domain is: " +
+                domainTenantMap[userDomainUID][2] + ", Tenant UID of user is: " + userAPSTenant, logging.INFO, True)
+            # Creating "affectedUsers" map: { user UID : Tenant UID }
+            #affectedUsers[key] = userAPSTenant
 
+            # Obtain correct Domain APS UID
+            for k, v in domainTenantMap.items():
+                if (userAPSTenant in v) and (loginDomainPart in v):
+                    print "Correct domain UID for this affected user is: ", k
+                    affectedUsers[key] = k
+        else:
+            log("Situation with user " + str(key) + " is COMPLETELY UNEXPECTED. Check it!", logging.INFO, True)
 
-    #for user in usersMap.keys():
-        #print user
-        #print "Comparing this: ", usersMap[user][1], " and: ", domainTenantMap[user.split('@')[1]][2]
-        #if not usersMap[user][1] == domainTenantMap[user.split('@')[1]][2]:
-        #    affectedUsers.append(user)
-        #else:
-        #   next()
-
-        #print user
-
+    return affectedUsers
 
 
 def fixIncorrectDomainLink(userUIDToFix, correctDomainUIDToLink, appInstanceId):
@@ -210,6 +226,10 @@ def main():
                           usage="\nFind users whose UPN differs from domain name they are linked with. Fix by linking them to a correct domain in scope of the same subscription.\n\n  Usage: %prog --app-instance-id ID [--dry-run]")
     parser.add_option("--app-instance-id", dest="app_instance_id", type="int",
                       help="Office 365 APS 2.0 Application Instance ID")
+
+    parser.add_option("--mode", dest="mode", type="string", default=None,
+                      help="Script mode. Possible values: \n fixByDomainName - fix User <-> Domain links when login subdomain part does not match linked domain name; \n fixByTenantUID - fix User <-> Domain links when user and his domain are linked to different Tenant resources;")
+
     parser.add_option("--dry-run", dest="dry_run", action="store_true",
                       help="Dry-run mode: count affected users and create a report only")
     (options, args) = parser.parse_args()
@@ -217,12 +237,14 @@ def main():
     if not options.app_instance_id:
         parser.print_help()
         raise Exception("The required parameter 'app-instance-id' is not specified.")
+    elif not options.mode:
+        parser.print_help()
+        raise Exception("Required parameter 'mode' is not specified.")
 
     else:
         # init globals
         date_for_file_name = time.strftime("%Y%m%d-%H%M%S")
-        logfile_name = "./log_files/fixUserAndDomains_" + date_for_file_name + "_O365_instance_" + str(
-                options.app_instance_id) + ".log"
+        logfile_name = "./fixUserAndDomains_" + date_for_file_name + "_O365_instance_" + str(options.app_instance_id) + ".log"
         format_str = "%(asctime)s   %(levelname)s   %(message)s"
         logging.basicConfig(filename=logfile_name, level=logging.DEBUG, format=format_str)
 
@@ -231,18 +253,24 @@ def main():
         aps_api = apsapi.API(getApsApiUrl())
         appInstanceToken = getAppInstanceToken(options.app_instance_id, api)
 
-        # VBE: dtStart = dtStart = ... ?   ------- a glupost' of mine
-        dtStart = dtStart = datetime.datetime.now()
+        dtStart = datetime.datetime.now()
 
-        #instanceUsersCount = countInstanceResources(api, aps_api, appInstanceToken, options.app_instance_id, O365_APS_TYPE_USER)  # <-- count instance users, using the response headers
-        #print "Instance users total: ", instanceUsersCount
+        instanceUsersCount = countInstanceResources(api, aps_api, appInstanceToken, options.app_instance_id,
+                                                    O365_APS_TYPE_USER)  # <-- count instance users, using the response headers
+        print "Instance users total: ", instanceUsersCount
 
-        #allDomainMap1 = findAffectedUsersWrongDomainTenant(api, aps_api, appInstanceToken, options.app_instance_id)
-        #print allDomainMap1
-        alluserMap1 = findAffectedUsersWrongDomainTenant(api, aps_api, appInstanceToken, options.app_instance_id)
-        print alluserMap1  
+        # If we need to fix users by Office365/Tenant APS resource consistence:
+        if options.mode == 'fixByTenantUID':
+            affectedUsers = findAffectedUsersWrongDomainTenant(api, aps_api, appInstanceToken, options.app_instance_id)
+            print affectedUsers
 
+        # allDomainMap1 = findAffectedUsersWrongDomainTenant(api, aps_api, appInstanceToken, options.app_instance_id)
+        # print allDomainMap1
+        #findAffectedUsersWrongDomainTenant(api, aps_api, appInstanceToken, options.app_instance_id)
+        # print affectedUsersMap1
 
+        if options.mode == 'fixByDomainName' and (instanceUsersCount >= 0):
+            affectedUsers = findAffectedUsers(options.app_instance_id)   #<-- find all affected users, where UPN does not match domain linked
 
 
 """
