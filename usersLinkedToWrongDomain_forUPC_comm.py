@@ -158,7 +158,7 @@ def findAffectedUsersWrongDomainTenant(api, aps_api, Token, appInstanceId):
                     print "Correct domain UID for this affected user is: ", k
                     affectedUsers[key] = k
         else:
-            log("Situation with user " + str(key) + " is COMPLETELY UNEXPECTED. Check it!", logging.INFO, True)
+            log("Situation witht user " + str(key) + " is COMPLETELY UNEXPECTED. Check it!", logging.INFO, True)
 
     return affectedUsers
 
