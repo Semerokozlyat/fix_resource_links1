@@ -152,7 +152,7 @@ def findAffectedUsersWrongDomainTenant(api, aps_api, Token, appInstanceId):
             # Creating "affectedUsers" map: { user UID : Tenant UID }
             #affectedUsers[key] = userAPSTenant
 
-            # Obtain correct Domain APS UID
+            # Obtain correct Domain APS UID identifier
             for k, v in domainTenantMap.items():
                 if (userAPSTenant in v) and (loginDomainPart in v):
                     print "Correct domain UID for this affected user is: ", k
